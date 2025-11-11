@@ -57,12 +57,12 @@ def get_chat_model(client, model_name):
     # 히스토리 중 최근 6턴만 유지하여 API에 전달 (429 오류 방지 및 비용 절감)
     recent_history = st.session_state['history'][-12:] # 6턴 = 12개의 메시지 파트 (user, model)
     
-    # [최종 오류 수정] types.Content 객체로 변환 시 안전하게 'role'과 'text' 키를 사용
     contents = []
     for msg in recent_history:
         # role은 'user' 또는 'model'이어야 하며, text는 반드시 존재해야 함
         if 'role' in msg and 'text' in msg:
-            contents.append(types.Content(role=msg['role'], parts=[types.Part.from_text(msg['text'])]))
+            # [오류 수정]: types.Part.from_text() 대신 types.Part(text=...)를 사용하여 인자 오류 방지
+            contents.append(types.Content(role=msg['role'], parts=[types.Part(text=msg['text'])]))
         else:
             # 손상된 히스토리 메시지는 건너뛰고 경고만 표시 (이전 세션의 오류 방지)
             st.sidebar.warning(f"손상된 히스토리 메시지 스킵: {msg}")
