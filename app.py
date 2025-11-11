@@ -55,59 +55,20 @@ def call_gemini_with_retry(client, model_name, prompt, max_retries=3):
     # 히스토리 중 최근 6턴만 유지하여 API에 전달 (429 오류 방지 및 비용 절감)
     recent_history = st.session_state['history'][-12:]  # 6턴 = 12개의 메시지 파트 (user, model)
     
-    # 전체 대화 내용 구성 (히스토리 + 현재 프롬프트)
-    all_messages = []
-    for msg in recent_history:
-        if 'role' in msg and 'text' in msg:
-            all_messages.append({
-                "role": msg['role'],
-                "parts": [{"text": msg['text']}]
-            })
-    # 현재 사용자 메시지 추가
-    all_messages.append({
-        "role": "user",
-        "parts": [{"text": prompt}]
-    })
-    
     for attempt in range(max_retries):
         try:
-            # 방법 1: chats.create를 사용 (히스토리 없이 세션 생성)
-            # 세션은 자동으로 이전 대화를 기억하지만, Streamlit에서는 매번 새로 생성해야 함
-            # 따라서 히스토리를 포함한 전체 메시지를 한번에 전달하는 방식 사용
+            # 가장 간단한 방법: 히스토리 없이 현재 프롬프트만 전송
+            # (대화 맥락은 유지되지 않지만, 일단 작동하는지 확인)
             chat = client.chats.create(
                 model=model_name,
                 system_instruction=SYSTEM_PROMPT
             )
-            
-            # 히스토리가 있으면 각 메시지를 순차적으로 전송
-            if len(all_messages) > 1:
-                # 마지막 메시지(현재 프롬프트)를 제외한 모든 메시지를 히스토리로 전송
-                for msg in all_messages[:-1]:
-                    if msg['role'] == 'user':
-                        chat.send_message(msg['parts'][0]['text'])
-                    # model 응답은 자동으로 처리되므로 건너뜀
-            
-            # 현재 프롬프트 전송 및 응답 받기
-            response = chat.send_message(all_messages[-1]['parts'][0]['text'])
+            response = chat.send_message(prompt)
             return response.text
             
         except Exception as e:
             error_msg = str(e)
             error_type = type(e).__name__
-            
-            # 첫 번째 시도가 실패하면, 더 간단한 방법 시도
-            if attempt == 0:
-                try:
-                    # 방법 2: 히스토리 없이 현재 프롬프트만 전송
-                    chat = client.chats.create(
-                        model=model_name,
-                        system_instruction=SYSTEM_PROMPT
-                    )
-                    response = chat.send_message(prompt)
-                    return response.text
-                except Exception as e2:
-                    # 두 번째 방법도 실패하면 원래 오류 표시
-                    pass
             
             # APIError 처리 (429 등)
             if isinstance(e, APIError):
@@ -121,7 +82,7 @@ def call_gemini_with_retry(client, model_name, prompt, max_retries=3):
                     st.error(f"상세 오류:\n{traceback.format_exc()}")
                     return f"API 오류: {error_msg}"
             else:
-                # 기타 오류
+                # 기타 오류 - 상세 정보 표시
                 if attempt == max_retries - 1:
                     st.error(f"오류 발생 ({error_type}): {error_msg}")
                     import traceback
