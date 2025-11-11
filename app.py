@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import time
 from google import genai
+from google.genai import types
 from google.genai.errors import APIError
 
 # --- 상수 설정 ---
@@ -50,38 +51,39 @@ def reset_conversation():
     st.session_state['csv_log'] = []
     st.rerun()
 
-def get_chat_model(client, model_name):
-    """현재 대화 히스토리를 기반으로 ChatSession을 설정합니다."""
-    
+def call_gemini_with_retry(client, model_name, prompt, max_retries=3):
+    """Gemini API를 호출하고 429 오류 시 재시도합니다."""
     # 히스토리 중 최근 6턴만 유지하여 API에 전달 (429 오류 방지 및 비용 절감)
-    recent_history = st.session_state['history'][-12:] # 6턴 = 12개의 메시지 파트 (user, model)
+    recent_history = st.session_state['history'][-12:]  # 6턴 = 12개의 메시지 파트 (user, model)
     
+    # 대화 히스토리를 메시지 리스트로 구성 (현재 사용자 메시지 포함)
     contents = []
     for msg in recent_history:
-        # role은 'user' 또는 'model'이어야 하며, text는 반드시 존재해야 함
         if 'role' in msg and 'text' in msg:
-            # [오류 수정]: 딕셔너리 형태로 히스토리 전달 (types.Part/Content 객체 사용 시 오류 방지)
-            contents.append({
-                "role": msg['role'],
-                "parts": [{"text": msg['text']}]
-            })
-        else:
-            # 손상된 히스토리 메시지는 건너뛰고 경고만 표시 (이전 세션의 오류 방지)
-            st.sidebar.warning(f"손상된 히스토리 메시지 스킵: {msg}")
-
-    # ChatSession 초기화
-    chat = client.chats.create(
-        model=model_name,
-        system_instruction=SYSTEM_PROMPT,
-        history=contents
+            contents.append(
+                types.Content(
+                    role=msg['role'],
+                    parts=[types.Part(text=msg['text'])]
+                )
+            )
+    
+    # 현재 사용자 메시지 추가
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[types.Part(text=prompt)]
+        )
     )
-    return chat
-
-def call_gemini_with_retry(chat_session, prompt, max_retries=3):
-    """Gemini API를 호출하고 429 오류 시 재시도합니다."""
+    
     for attempt in range(max_retries):
         try:
-            response = chat_session.send_message(prompt)
+            # generate_content를 사용하여 대화 생성 (히스토리 포함)
+            # system_instruction을 직접 전달
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                system_instruction=SYSTEM_PROMPT
+            )
             return response.text
         except APIError as e:
             if '429' in str(e) and attempt < max_retries - 1:
@@ -92,6 +94,8 @@ def call_gemini_with_retry(chat_session, prompt, max_retries=3):
                 return "죄송합니다. 현재 상담 서버에 오류가 발생하여 응답을 드릴 수 없습니다."
         except Exception as e:
             st.error(f"예기치 않은 오류 발생: {e}")
+            import traceback
+            st.error(f"상세 오류: {traceback.format_exc()}")
             return "죄송합니다. 처리 중 예기치 않은 오류가 발생했습니다."
     return "API 호출에 최종 실패했습니다. 나중에 다시 시도해 주세요."
 
@@ -167,27 +171,25 @@ for message in st.session_state['history']:
 # 4. 사용자 입력 처리
 if user_prompt := st.chat_input("당신의 고민을 편안하게 털어놓아주세요..."):
     
-    # a. 사용자 메시지 표시 및 기록
-    st.session_state['history'].append({"role": "user", "text": user_prompt})
+    # a. 사용자 메시지 표시 (히스토리에는 API 호출 후 추가)
     with st.chat_message("user", avatar="🙂"):
         st.markdown(user_prompt)
 
     # b. Gemini 호출
     with st.spinner("전문적인 상담 답변을 생각하는 중입니다..."):
         
-        # 챗 세션 생성 (최근 히스토리를 넣어 컨텍스트 유지)
-        chat = get_chat_model(client, selected_model)
-        
-        # 재시도 로직을 포함하여 API 호출
-        model_response = call_gemini_with_retry(chat, user_prompt)
+        # 재시도 로직을 포함하여 API 호출 (히스토리 포함)
+        model_response = call_gemini_with_retry(client, selected_model, user_prompt)
 
     # c. 모델 응답 표시 및 기록
     with st.chat_message("model", avatar="🤖"):
         st.markdown(model_response)
     
+    # d. 히스토리에 사용자 메시지와 모델 응답 추가
+    st.session_state['history'].append({"role": "user", "text": user_prompt})
     st.session_state['history'].append({"role": "model", "text": model_response})
     
-    # d. CSV 로그 기록
+    # e. CSV 로그 기록
     st.session_state['csv_log'].append({
         'session_id': st.session_state['session_id'],
         'model': selected_model,
@@ -203,5 +205,5 @@ if user_prompt := st.chat_input("당신의 고민을 편안하게 털어놓아�
         'message': model_response
     })
 
-    # e. UI 업데이트를 위해 재실행
+    # f. UI 업데이트를 위해 재실행
     st.rerun()
