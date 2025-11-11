@@ -55,15 +55,18 @@ def call_gemini_with_retry(client, model_name, prompt, max_retries=3):
     # 히스토리 중 최근 6턴만 유지하여 API에 전달 (429 오류 방지 및 비용 절감)
     recent_history = st.session_state['history'][-12:]  # 6턴 = 12개의 메시지 파트 (user, model)
     
+    # 시스템 프롬프트를 포함한 전체 프롬프트 구성
+    # 시스템 프롬프트를 프롬프트 앞에 추가
+    full_prompt = f"{SYSTEM_PROMPT}\n\n사용자 메시지: {prompt}"
+    
     for attempt in range(max_retries):
         try:
-            # 가장 간단한 방법: 히스토리 없이 현재 프롬프트만 전송
-            # (대화 맥락은 유지되지 않지만, 일단 작동하는지 확인)
+            # chats.create는 system_instruction을 지원하지 않으므로
+            # 시스템 프롬프트를 프롬프트에 포함시켜 전송
             chat = client.chats.create(
-                model=model_name,
-                system_instruction=SYSTEM_PROMPT
+                model=model_name
             )
-            response = chat.send_message(prompt)
+            response = chat.send_message(full_prompt)
             return response.text
             
         except Exception as e:
