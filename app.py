@@ -55,12 +55,17 @@ def get_chat_model(client, model_name):
     """현재 대화 히스토리를 기반으로 ChatSession을 설정합니다."""
     
     # 히스토리 중 최근 6턴만 유지하여 API에 전달 (429 오류 방지 및 비용 절감)
-    # Streamlit 히스토리는 그대로 두고, API 요청 시에만 잘라서 사용
     recent_history = st.session_state['history'][-12:] # 6턴 = 12개의 메시지 파트 (user, model)
     
-    # types.Content 객체로 변환
-    contents = [types.Content(role=msg['role'], parts=[types.Part.from_text(msg['text'])]) 
-                for msg in recent_history]
+    # [최종 오류 수정] types.Content 객체로 변환 시 안전하게 'role'과 'text' 키를 사용
+    contents = []
+    for msg in recent_history:
+        # role은 'user' 또는 'model'이어야 하며, text는 반드시 존재해야 함
+        if 'role' in msg and 'text' in msg:
+            contents.append(types.Content(role=msg['role'], parts=[types.Part.from_text(msg['text'])]))
+        else:
+            # 손상된 히스토리 메시지는 건너뛰고 경고만 표시 (이전 세션의 오류 방지)
+            st.sidebar.warning(f"손상된 히스토리 메시지 스킵: {msg}")
 
     # ChatSession 초기화
     chat = client.chats.create(
@@ -151,8 +156,10 @@ with st.sidebar:
 
 # 3. 대화 표시 및 처리
 for message in st.session_state['history']:
-    with st.chat_message(message["role"], avatar="🤖" if message["role"] == "model" else "🙂"):
-        st.markdown(message["text"])
+    # 메시지 표시 시에도 안전하게 'role'과 'text' 키를 사용
+    if 'role' in message and 'text' in message:
+        with st.chat_message(message["role"], avatar="🤖" if message["role"] == "model" else "🙂"):
+            st.markdown(message["text"])
 
 
 # 4. 사용자 입력 처리
