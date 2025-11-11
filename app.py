@@ -3,7 +3,6 @@ import pandas as pd
 import io
 import time
 from google import genai
-from google.genai import types
 from google.genai.errors import APIError
 
 # --- 상수 설정 ---
@@ -61,8 +60,11 @@ def get_chat_model(client, model_name):
     for msg in recent_history:
         # role은 'user' 또는 'model'이어야 하며, text는 반드시 존재해야 함
         if 'role' in msg and 'text' in msg:
-            # [오류 수정]: types.Part.from_text() 대신 types.Part(text=...)를 사용하여 인자 오류 방지
-            contents.append(types.Content(role=msg['role'], parts=[types.Part(text=msg['text'])]))
+            # [오류 수정]: 딕셔너리 형태로 히스토리 전달 (types.Part/Content 객체 사용 시 오류 방지)
+            contents.append({
+                "role": msg['role'],
+                "parts": [{"text": msg['text']}]
+            })
         else:
             # 손상된 히스토리 메시지는 건너뛰고 경고만 표시 (이전 세션의 오류 방지)
             st.sidebar.warning(f"손상된 히스토리 메시지 스킵: {msg}")
